@@ -1,6 +1,6 @@
-import { Duration, Stack, StackProps } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { Vpc, IpAddresses, SubnetType} from 'aws-cdk-lib/aws-ec2';
+import { Vpc, IpAddresses, SubnetType, InterfaceVpcEndpointAwsService, GatewayVpcEndpointAwsService} from 'aws-cdk-lib/aws-ec2';
 import { Cluster, ContainerImage } from 'aws-cdk-lib/aws-ecs';
 import { ApplicationLoadBalancedFargateService,  } from 'aws-cdk-lib/aws-ecs-patterns';
 import { HostedZone } from 'aws-cdk-lib/aws-route53';
@@ -14,9 +14,26 @@ export class CdkStack extends Stack {
 			maxAzs: 2,
 			vpcName: 'vpc-hello-world',
 			natGateways: 0,
-			
+			gatewayEndpoints: {
+				S3: {
+				  service: GatewayVpcEndpointAwsService.S3,
+				}
+			},
+
+		});
+		
+		// needed for AWS services access from isolated subnet
+		vpc.addInterfaceEndpoint('LogsVpcEndpoint', {
+			service: InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,	  
 		});
 
+		vpc.addInterfaceEndpoint('EcrVpcEndpoint', {
+			service: InterfaceVpcEndpointAwsService.ECR,	  
+		});
+
+		vpc.addInterfaceEndpoint('EcrDockerVpcEndpoint', {
+			service: InterfaceVpcEndpointAwsService.ECR_DOCKER,	  
+		});
 		const cluster = new Cluster(this, 'Cluster', {
 			vpc: vpc,
 			clusterName: 'cluster-hello-world'
@@ -28,11 +45,12 @@ export class CdkStack extends Stack {
 */		
 		const loadBalancedFargateService = new ApplicationLoadBalancedFargateService(this, 'Service', {
 			cluster,
+			
 			memoryLimitMiB: 512,
 			cpu: 256,
 			taskImageOptions: {
 				image: ContainerImage.fromAsset('../'),
-				containerPort:8080
+				containerPort:80
 			},
 			circuitBreaker: {rollback: true},
 			desiredCount: 1,
@@ -43,13 +61,14 @@ export class CdkStack extends Stack {
 			serviceName:'hello-world',
 			taskSubnets: {
 				onePerAz: true,
-				subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+				subnetType: SubnetType.PRIVATE_ISOLATED,
 			}
 			
 		});
 
 		loadBalancedFargateService.targetGroup.configureHealthCheck({
 			path: "/actuator/health",
+			port: '80'
 		});
 	}
 }
